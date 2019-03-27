@@ -1,0 +1,100 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+
+module FDiv
+  class OptParse
+    attr_reader :options, :regexp, :replacement, :files
+
+    def initialize
+      @options = {}
+      @files = []
+    end
+
+    def parse!(args)
+      parse(args)
+
+      if @files.size < 1
+        puts option_parser.banner
+        exit 1
+      end
+
+      @regexp = Regexp.new(@regexp)
+    rescue RegexpError
+      puts "Invalid regexp: '#{@regexp}'"
+      exit 1
+    end
+
+    def parse(args)
+      args = args.dup
+
+      option_parser.parse!(args, into: @options)
+      @regexp, @replacement, *@files = args
+    end
+
+    private
+
+    def option_parser
+      OptionParser.new do |opts|
+        opts.banner = "Usage: fdiv [options] regexp replacement [file1, file2, ...]"
+
+        opts.on("-n", "--dry-run")
+        opts.on("-v", "--verbose")
+      end
+    end
+  end
+
+  class Executer
+    def initialize(options, regexp, replacement, files)
+      @options = options
+      @regexp = regexp
+      @replacement = replacement
+      @files = files
+    end
+
+    def execute
+      targets.each do |target|
+        dest = destpath(target)
+        next if dest == target
+
+        move(target, dest)
+      end
+    end
+
+    private
+
+    def targets
+      @files.
+        flat_map { |file| Dir.glob(file) }.
+        sort.
+        uniq
+    end
+
+    def destpath(source)
+      rep = @replacement.gsub(/\\_/, source)
+
+      matchdata = rep.match(@regexp)
+      captures = matchdata.to_a
+      dic = Hash[captures.size.times.map { |i| "\\#{i}" }.zip(captures)]
+
+      rep.gsub(/\\\d/, dic)
+    end
+
+    require "fileutils"
+
+    def move(src, dest)
+      options = {}
+      options[:noop] = true if @options[:"dry-run"]
+      options[:verbose] = true if @options[:verbose]
+
+      FileUtils.mkdir_p(File.dirname(dest)) unless @options[:"dry-run"]
+      FileUtils.mv(src, dest, options)
+    end
+  end
+end
+
+optparse = FDiv::OptParse.new
+optparse.parse!(ARGV)
+
+executer = FDiv::Executer.new(*optparse.instance_eval("[options, regexp, replacement, files]"))
+executer.execute
